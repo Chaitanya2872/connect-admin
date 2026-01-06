@@ -39,14 +39,27 @@ export async function handleUpdate(payload: any) {
     })
   }
 
-  /* ---------------- Switch Update (4CH Device) ---------------- */
-  if (switch_no && status) {
-    const switchNo = Number(
-      String(switch_no).replace('S', '')
-    )
+  /* ---------------- Switch Update (S1–S100 ONLY) ---------------- */
+  if (typeof switch_no === 'string' && status) {
+
+    // Accept ONLY S1 to S100
+    const match = switch_no.match(/^S(\d{1,3})$/)
+
+    if (!match) {
+      console.log(`⚠️ Ignored unsupported switch: ${switch_no}`)
+      return
+    }
+
+    const switchNo = Number(match[1])
+
+    if (switchNo < 1 || switchNo > 100) {
+      console.log(`⚠️ Switch out of range: S${switchNo}`)
+      return
+    }
 
     await saveSwitchStatus(deviceid, switchNo, status)
   }
 
   console.log('🔄 Update saved:', deviceid)
 }
+

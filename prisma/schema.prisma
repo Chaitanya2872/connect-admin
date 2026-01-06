@@ -1,0 +1,58 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Device {
+  id              Int      @id @default(autoincrement())
+  deviceId        String   @unique
+  thingId         String?
+  firmwareVersion String?
+  macAddress      String?
+  ipAddress       String?
+  deviceType      String?
+  createdAt       DateTime @default(now())
+}
+
+model DeviceClimate {
+  id          Int      @id @default(autoincrement())
+  deviceId    String
+  temperature Float?
+  humidity    Float?
+  sunlight    Int?
+  createdAt   DateTime @default(now())
+}
+
+model DeviceEnergy {
+  id        Int      @id @default(autoincrement())
+  deviceId  String
+  voltage   Float?
+  current   Float?
+  power     Float?
+  unit      Float?
+  createdAt DateTime @default(now())
+}
+
+model DeviceHealth {
+  id        Int      @id @default(autoincrement())
+  deviceId  String
+  heap      Int?
+  rssi      Int?
+  carrier   String?
+  fault     String?
+  createdAt DateTime @default(now())
+}
+
+model DeviceSwitch {
+  id        Int      @id @default(autoincrement())
+  deviceId  String
+  switchNo  Int
+  status    String
+  updatedAt DateTime @updatedAt
+
+  @@unique([deviceId, switchNo])
+}

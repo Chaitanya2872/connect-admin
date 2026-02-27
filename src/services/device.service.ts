@@ -8,9 +8,13 @@ export async function handleAlive(payload: any) {
     firmware_version
   } = payload
 
-  const deviceType = deviceid.startsWith('IOTIQ4SC_')
-    ? 'SWITCH_4CH'
-    : 'SINGLE'
+  let deviceType = 'SINGLE'
+  
+  if (deviceid.startsWith('IOTIQ4SC_')) {
+    deviceType = 'SWITCH_4CH'
+  } else if (deviceid.startsWith('IOTIQDC2_')) {
+    deviceType = 'DONGLE_2CH'
+  }
 
   await prisma.device.upsert({
     where: { deviceId: deviceid },

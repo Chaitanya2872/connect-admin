@@ -1,0 +1,132 @@
+// This is your Prisma schema file
+// Location: prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"  // or "mysql" or "sqlite" based on your database
+  url      = env("DATABASE_URL")
+}
+
+model Device {
+  id              String   @id @default(uuid())
+  deviceId        String   @unique
+  deviceType      String   @default("SINGLE") // 'SINGLE', 'SWITCH_4CH', 'DONGLE_2CH', 'SMART_METER'
+  channels        String?  // For dongle: "4S1F", "2C0F", etc.
+  thingId         String?
+  ipAddress       String?
+  macAddress      String?
+  firmwareVersion String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @default(now()) @updatedAt
+
+  // Relations
+  switches        DeviceSwitch[]
+  climateData     DeviceClimate[]
+  energyData      DeviceEnergy[]
+  healthData      DeviceHealth[]
+  smartMeterData  SmartMeterData[]
+
+  @@index([deviceId])
+  @@index([thingId])
+  @@index([deviceType])
+}
+
+model DeviceSwitch {
+  id        String   @id @default(uuid())
+  deviceId  String
+  switchNo  Int
+  status    String   // "on" or "off"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  device Device @relation(fields: [deviceId], references: [deviceId], onDelete: Cascade)
+
+  @@unique([deviceId, switchNo])
+  @@index([deviceId])
+}
+
+model DeviceClimate {
+  id          String   @id @default(uuid())
+  deviceId    String
+  temperature Float
+  humidity    Float
+  sunlight    Float
+  createdAt   DateTime @default(now())
+
+  device Device @relation(fields: [deviceId], references: [deviceId], onDelete: Cascade)
+
+  @@index([deviceId])
+  @@index([createdAt])
+}
+
+model DeviceEnergy {
+  id        String   @id @default(uuid())
+  deviceId  String
+  voltage   Float
+  current   Float
+  power     Float
+  unit      Float
+  createdAt DateTime @default(now())
+
+  device Device @relation(fields: [deviceId], references: [deviceId], onDelete: Cascade)
+
+  @@index([deviceId])
+  @@index([createdAt])
+}
+
+model DeviceHealth {
+  id        String   @id @default(uuid())
+  deviceId  String
+  heap      Int?
+  rssi      Int?
+  carrier   String?
+  fault     String?
+  createdAt DateTime @default(now())
+
+  device Device @relation(fields: [deviceId], references: [deviceId], onDelete: Cascade)
+
+  @@index([deviceId])
+  @@index([createdAt])
+}
+
+model SmartMeterData {
+  id              String   @id @default(uuid())
+  deviceId        String
+  meter           String?  // meter number or identifier
+  voltage1        Float?   // phase 1 voltage
+  voltage2        Float?   // phase 2 voltage
+  current         Float?   // current value
+  powerFactor     Float?   // power factor
+  power           Float?   // power value
+  frequency       Float?   // frequency value
+  machine         Boolean? // machine status
+  status          String?  // "on" or "off" (legacy)
+  temperature     Float?   // temp value (legacy)
+  voltage         Float?   // from energy string (legacy)
+  unit            Float?   // from energy string (legacy)
+  fault           String?  // "olr/scr" or null (legacy)
+  createdAt       DateTime @default(now())
+
+  device Device @relation(fields: [deviceId], references: [deviceId], onDelete: Cascade)
+
+  @@index([deviceId])
+  @@index([createdAt])
+}
+
+model SmartMeterSettings {
+  id              String   @id @default(uuid())
+  deviceId        String   @unique
+  parameter       String?  // Vrp or other energy parameter
+  range           String?  // 240 or other threshold value
+  threshold       String?  // "low" or "high"
+  triggerTime     String?  // "16.00" - 24hr format
+  stopTime        String?  // "19.30" - 24hr format
+  repeatPattern   String?  // "oooooof" - monday-sunday pattern
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([deviceId])
+}

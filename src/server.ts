@@ -5,12 +5,14 @@ import { subscribeTopics } from './mqtt/subscribers'
 import { setMqttConnection } from './mqtt/connection_holder'
 
 async function bootstrap() {
-  const mqttConnection = await connectMQTT()
+  const mqttConnections = await connectMQTT()
 
   // ✅ THIS LINE IS CRITICAL
-  setMqttConnection(mqttConnection)
+  setMqttConnection(mqttConnections[0])
 
-  subscribeTopics(mqttConnection)
+  mqttConnections.forEach((connection) => {
+    subscribeTopics(connection)
+  })
 
   app.listen(ENV.PORT, () => {
     console.log(`🚀 Server running on ${ENV.PORT}`)

@@ -95,25 +95,56 @@ model DeviceHealth {
 model SmartMeterData {
   id              String   @id @default(uuid())
   deviceId        String
-  meter           String?  // meter number or identifier
-  voltage1        Float?   // phase 1 voltage
-  voltage2        Float?   // phase 2 voltage
-  current         Float?   // current value
-  powerFactor     Float?   // power factor
-  power           Float?   // power value
-  frequency       Float?   // frequency value
-  machine         Boolean? // machine status
-  status          String?  // "on" or "off" (legacy)
-  temperature     Float?   // temp value (legacy)
-  voltage         Float?   // from energy string (legacy)
-  unit            Float?   // from energy string (legacy)
-  fault           String?  // "olr/scr" or null (legacy)
+  meter           String?
+
+  // Status
+  status          String?
+  machine         Boolean?
+  fault           String?
+  temperatureC    Float?
+  frequencyHz     Float?
+
+  // Voltage
+  voltagePhase1   Float?
+  voltagePhase2   Float?
+  voltagePhase3   Float?
+  voltageTotal    Float?
+
+  // Current
+  currentPhase1   Float?
+  currentPhase2   Float?
+  currentPhase3   Float?
+  currentTotal    Float?
+
+  // Active Power
+  powerPhase1     Float?
+  powerPhase2     Float?
+  powerPhase3     Float?
+  powerTotalActive Float?
+
+  // Power Factor
+  powerFactorPhase1 Float?
+  powerFactorPhase2 Float?
+  powerFactorPhase3 Float?
+  powerFactorTotal  Float?
+
+  // Energy
+  energyPhaseR    Float?
+  energyPhaseY    Float?
+  energyPhaseB    Float?
+  energyTotal3Phase Float?
+
+  // Derived
+  reactivePower   Float?
+  apparentPower   Float?
+
   createdAt       DateTime @default(now())
 
   device Device @relation(fields: [deviceId], references: [deviceId], onDelete: Cascade)
 
   @@index([deviceId])
   @@index([createdAt])
+  @@index([deviceId, createdAt])
 }
 
 model SmartMeterSettings {

@@ -15,6 +15,11 @@ export async function handleUpdate(payload: any) {
   } = payload
 
   try {
+    if (typeof deviceid !== 'string' || !deviceid.trim()) {
+      console.warn('⚠️ Ignoring update payload without valid deviceid:', payload)
+      return
+    }
+
     // Check if this is a smart meter device
     if (isSmartMeter(deviceid)) {
       await handleSmartMeterUpdate(payload)

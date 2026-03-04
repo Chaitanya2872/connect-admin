@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { Prisma } from '@prisma/client'
 import { publishToDevice } from '../mqtt/publishers'
 import { prisma } from '../db/prisma'
+import { getSmartMeterLiveSnapshotStored } from '../services/smartmeter.service'
 
 const router = Router()
 
@@ -10,23 +11,15 @@ const getQueryString = (value: unknown): string | undefined => {
     const first = value[0]
     return typeof first === 'string' ? first : first !== undefined ? String(first) : undefined
   }
-  if (typeof value === 'string') {
-    return value
-  }
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value)
-  }
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
   return undefined
 }
 
 const parseDateParam = (value?: string): Date | null => {
-  if (!value) {
-    return null
-  }
+  if (!value) return null
   const trimmed = value.trim()
-  if (!trimmed) {
-    return null
-  }
+  if (!trimmed) return null
 
   const parsed = (input: string | number) => {
     const date = new Date(input)
@@ -34,62 +27,44 @@ const parseDateParam = (value?: string): Date | null => {
   }
 
   const direct = parsed(trimmed)
-  if (direct) {
-    return direct
-  }
+  if (direct) return direct
 
   if (/^\d+$/.test(trimmed)) {
-    const milliseconds = Number(trimmed)
-    const date = parsed(milliseconds)
-    if (date) {
-      return date
-    }
+    const date = parsed(Number(trimmed))
+    if (date) return date
   }
 
   if (trimmed.includes(' ') && !trimmed.includes('+')) {
     const plusFixed = parsed(trimmed.replace(' ', '+'))
-    if (plusFixed) {
-      return plusFixed
-    }
+    if (plusFixed) return plusFixed
   }
 
   return null
 }
 
 const parseBucket = (value?: string): string | null => {
-  if (!value) {
-    return 'hour'
-  }
+  if (!value) return 'hour'
   const bucket = value.toLowerCase()
   const allowed = ['minute', 'hour', 'day', 'week', 'month']
   return allowed.includes(bucket) ? bucket : null
 }
 
 const parsePositiveInt = (value?: string, defaultValue?: number, maxValue?: number): number | null => {
-  if (!value) {
-    return defaultValue ?? null
-  }
+  if (!value) return defaultValue ?? null
   const parsed = Number.parseInt(value, 10)
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return null
-  }
-  if (maxValue && parsed > maxValue) {
-    return maxValue
-  }
+  if (!Number.isFinite(parsed) || parsed <= 0) return null
+  if (maxValue && parsed > maxValue) return maxValue
   return parsed
 }
 
 const toNumber = (value: unknown): number | null => {
-  if (value === null || value === undefined) {
-    return null
-  }
+  if (value === null || value === undefined) return null
   const n = Number(value)
   return Number.isFinite(n) ? n : null
 }
 
 /**
  * POST /api/smartmeter/:thingId/config
- * Configure smart meter WiFi and communication settings
  */
 router.post('/:thingId/config', async (req, res) => {
   try {
@@ -97,9 +72,7 @@ router.post('/:thingId/config', async (req, res) => {
     const { deviceid, ssid, password, access_token, secret, mode } = req.body
 
     if (!deviceid || !ssid || !password) {
-      return res.status(400).json({ 
-        error: 'deviceid, ssid and password are required' 
-      })
+      return res.status(400).json({ error: 'deviceid, ssid and password are required' })
     }
 
     const payload: any = {
@@ -108,13 +81,11 @@ router.post('/:thingId/config', async (req, res) => {
       password,
       access_token: access_token || '',
       secret: secret || '',
-      mode: mode || '1' // 1=WiFi, 2=BLE, 3=custom
+      mode: mode || '1'
     }
 
     await publishToDevice(thingId, 'config', payload)
-
     console.log(`📡 Smart Meter config sent: ${deviceid}`)
-
     res.json({ success: true })
   } catch (error) {
     console.error('❌ Smart meter config error:', error)
@@ -124,26 +95,14 @@ router.post('/:thingId/config', async (req, res) => {
 
 /**
  * POST /api/smartmeter/:thingId/setting
- * Configure smart meter parameters and schedules
  */
 router.post('/:thingId/setting', async (req, res) => {
   try {
     const { thingId } = req.params
-    const { 
-      deviceid, 
-      status, 
-      parameter, 
-      range, 
-      thres, 
-      trig_time, 
-      stop_time, 
-      repeat 
-    } = req.body
+    const { deviceid, status, parameter, range, thres, trig_time, stop_time, repeat } = req.body
 
     if (!deviceid) {
-      return res.status(400).json({ 
-        error: 'deviceid is required' 
-      })
+      return res.status(400).json({ error: 'deviceid is required' })
     }
 
     const payload: any = {
@@ -159,7 +118,6 @@ router.post('/:thingId/setting', async (req, res) => {
 
     await publishToDevice(thingId, 'setting', payload)
 
-    // Save settings to database
     if (parameter || range || thres || trig_time || stop_time || repeat) {
       await prisma.smartMeterSettings.upsert({
         where: { deviceId: deviceid },
@@ -184,7 +142,6 @@ router.post('/:thingId/setting', async (req, res) => {
     }
 
     console.log(`⚙️ Smart Meter settings sent: ${deviceid}`)
-
     res.json({ success: true })
   } catch (error) {
     console.error('❌ Smart meter setting error:', error)
@@ -194,7 +151,6 @@ router.post('/:thingId/setting', async (req, res) => {
 
 /**
  * POST /api/smartmeter/:thingId/control
- * Control smart meter relay (on/off)
  */
 router.post('/:thingId/control', async (req, res) => {
   try {
@@ -202,26 +158,16 @@ router.post('/:thingId/control', async (req, res) => {
     const { deviceid, status } = req.body
 
     if (!deviceid || !status) {
-      return res.status(400).json({ 
-        error: 'deviceid and status are required' 
-      })
+      return res.status(400).json({ error: 'deviceid and status are required' })
     }
 
     if (!['on', 'off'].includes(status.toLowerCase())) {
-      return res.status(400).json({ 
-        error: 'status must be "on" or "off"' 
-      })
+      return res.status(400).json({ error: 'status must be "on" or "off"' })
     }
 
-    const payload = {
-      deviceid,
-      status: status.toLowerCase()
-    }
-
+    const payload = { deviceid, status: status.toLowerCase() }
     await publishToDevice(thingId, 'control', payload)
-
     console.log(`🎛️ Smart Meter control sent: ${deviceid} → ${status}`)
-
     res.json({ success: true })
   } catch (error) {
     console.error('❌ Smart meter control error:', error)
@@ -231,7 +177,6 @@ router.post('/:thingId/control', async (req, res) => {
 
 /**
  * POST /api/smartmeter/:thingId/reset
- * Reset smart meter to default settings
  */
 router.post('/:thingId/reset', async (req, res) => {
   try {
@@ -242,16 +187,9 @@ router.post('/:thingId/reset', async (req, res) => {
       return res.status(400).json({ error: 'deviceid is required' })
     }
 
-    const payload: any = {
-      deviceid,
-      mode: mode || '1',
-      secret: secret || ''
-    }
-
+    const payload: any = { deviceid, mode: mode || '1', secret: secret || '' }
     await publishToDevice(thingId, 'reset', payload)
-
     console.log(`🔄 Smart Meter reset sent: ${deviceid}`)
-
     res.json({ success: true })
   } catch (error) {
     console.error('❌ Smart meter reset error:', error)
@@ -261,7 +199,6 @@ router.post('/:thingId/reset', async (req, res) => {
 
 /**
  * POST /api/smartmeter/:thingId/alive
- * Request alive status from smart meter
  */
 router.post('/:thingId/alive', async (req, res) => {
   try {
@@ -273,9 +210,7 @@ router.post('/:thingId/alive', async (req, res) => {
     }
 
     await publishToDevice(thingId, 'alive', { deviceid })
-
     console.log(`💚 Smart Meter alive request sent: ${deviceid}`)
-
     res.json({ success: true })
   } catch (error) {
     console.error('❌ Smart meter alive error:', error)
@@ -285,8 +220,6 @@ router.post('/:thingId/alive', async (req, res) => {
 
 /**
  * GET /api/smartmeter/:deviceId/analytics/summary
- * Get aggregate analytics for smart meter data
- * Query: from, to (ISO date), meter
  */
 router.get('/:deviceId/analytics/summary', async (req, res) => {
   try {
@@ -296,116 +229,86 @@ router.get('/:deviceId/analytics/summary', async (req, res) => {
     const meterValue = getQueryString(req.query.meter)
 
     const fromDate = parseDateParam(fromValue)
-    if (fromValue && !fromDate) {
-      return res.status(400).json({ error: 'Invalid from date' })
-    }
+    if (fromValue && !fromDate) return res.status(400).json({ error: 'Invalid from date' })
 
     const toDate = parseDateParam(toValue)
-    if (toValue && !toDate) {
-      return res.status(400).json({ error: 'Invalid to date' })
-    }
+    if (toValue && !toDate) return res.status(400).json({ error: 'Invalid to date' })
 
     const device = await prisma.device.findUnique({
       where: { deviceId },
       select: { deviceId: true, deviceType: true }
     })
 
-    if (!device) {
-      return res.status(404).json({ error: 'Device not found' })
-    }
-
-    if (device.deviceType !== 'SMART_METER') {
-      return res.status(400).json({ error: 'Not a smart meter device' })
-    }
+    if (!device) return res.status(404).json({ error: 'Device not found' })
+    if (device.deviceType !== 'SMART_METER') return res.status(400).json({ error: 'Not a smart meter device' })
 
     const where: any = { deviceId }
-    if (meterValue) {
-      where.meter = meterValue
-    }
+    if (meterValue) where.meter = meterValue
     if (fromDate || toDate) {
       where.createdAt = {}
-      if (fromDate) {
-        where.createdAt.gte = fromDate
-      }
-      if (toDate) {
-        where.createdAt.lte = toDate
-      }
+      if (fromDate) where.createdAt.gte = fromDate
+      if (toDate) where.createdAt.lte = toDate
     }
 
-    const conditions: Prisma.Sql[] = [
-      Prisma.sql`"deviceId" = ${deviceId}`
-    ]
-    if (meterValue) {
-      conditions.push(Prisma.sql`"meter" = ${meterValue}`)
-    }
-    if (fromDate) {
-      conditions.push(Prisma.sql`"createdAt" >= ${fromDate}`)
-    }
-    if (toDate) {
-      conditions.push(Prisma.sql`"createdAt" <= ${toDate}`)
-    }
+    const conditions: Prisma.Sql[] = [Prisma.sql`"deviceId" = ${deviceId}`]
+    if (meterValue) conditions.push(Prisma.sql`"meter" = ${meterValue}`)
+    if (fromDate) conditions.push(Prisma.sql`"createdAt" >= ${fromDate}`)
+    if (toDate) conditions.push(Prisma.sql`"createdAt" <= ${toDate}`)
     const whereSql = Prisma.join(conditions, ' AND ')
 
     const [summaryRows, latest, first, machineCounts] = await Promise.all([
       prisma.$queryRaw<{
         samples: number
-        voltage1Avg: number | null
-        voltage2Avg: number | null
-        currentAvg: number | null
-        powerFactorAvg: number | null
-        powerAvg: number | null
-        frequencyAvg: number | null
-        voltage1Min: number | null
-        voltage2Min: number | null
-        currentMin: number | null
-        powerFactorMin: number | null
-        powerMin: number | null
-        frequencyMin: number | null
-        voltage1Max: number | null
-        voltage2Max: number | null
-        currentMax: number | null
-        powerFactorMax: number | null
-        powerMax: number | null
-        frequencyMax: number | null
+        voltagePhase1Avg: number | null
+        voltagePhase2Avg: number | null
+        voltagePhase3Avg: number | null
+        voltageTotalAvg: number | null
+        currentTotalAvg: number | null
+        powerFactorTotalAvg: number | null
+        powerTotalActiveAvg: number | null
+        frequencyHzAvg: number | null
+        voltagePhase1Min: number | null
+        voltageTotalMin: number | null
+        currentTotalMin: number | null
+        powerFactorTotalMin: number | null
+        powerTotalActiveMin: number | null
+        frequencyHzMin: number | null
+        voltagePhase1Max: number | null
+        voltageTotalMax: number | null
+        currentTotalMax: number | null
+        powerFactorTotalMax: number | null
+        powerTotalActiveMax: number | null
+        frequencyHzMax: number | null
       }[]>(Prisma.sql`
         SELECT
           COUNT(*)::int AS "samples",
-          AVG("voltage1") AS "voltage1Avg",
-          AVG("voltage2") AS "voltage2Avg",
-          AVG("current") AS "currentAvg",
-          AVG("powerFactor") AS "powerFactorAvg",
-          AVG("power") AS "powerAvg",
-          AVG("frequency") AS "frequencyAvg",
-          MIN("voltage1") AS "voltage1Min",
-          MIN("voltage2") AS "voltage2Min",
-          MIN("current") AS "currentMin",
-          MIN("powerFactor") AS "powerFactorMin",
-          MIN("power") AS "powerMin",
-          MIN("frequency") AS "frequencyMin",
-          MAX("voltage1") AS "voltage1Max",
-          MAX("voltage2") AS "voltage2Max",
-          MAX("current") AS "currentMax",
-          MAX("powerFactor") AS "powerFactorMax",
-          MAX("power") AS "powerMax",
-          MAX("frequency") AS "frequencyMax"
+          AVG("voltagePhase1")    AS "voltagePhase1Avg",
+          AVG("voltagePhase2")    AS "voltagePhase2Avg",
+          AVG("voltagePhase3")    AS "voltagePhase3Avg",
+          AVG("voltageTotal")     AS "voltageTotalAvg",
+          AVG("currentTotal")     AS "currentTotalAvg",
+          AVG("powerFactorTotal") AS "powerFactorTotalAvg",
+          AVG("powerTotalActive") AS "powerTotalActiveAvg",
+          AVG("frequencyHz")      AS "frequencyHzAvg",
+          MIN("voltagePhase1")    AS "voltagePhase1Min",
+          MIN("voltageTotal")     AS "voltageTotalMin",
+          MIN("currentTotal")     AS "currentTotalMin",
+          MIN("powerFactorTotal") AS "powerFactorTotalMin",
+          MIN("powerTotalActive") AS "powerTotalActiveMin",
+          MIN("frequencyHz")      AS "frequencyHzMin",
+          MAX("voltagePhase1")    AS "voltagePhase1Max",
+          MAX("voltageTotal")     AS "voltageTotalMax",
+          MAX("currentTotal")     AS "currentTotalMax",
+          MAX("powerFactorTotal") AS "powerFactorTotalMax",
+          MAX("powerTotalActive") AS "powerTotalActiveMax",
+          MAX("frequencyHz")      AS "frequencyHzMax"
         FROM "SmartMeterData"
         WHERE ${whereSql}
       `),
-      prisma.smartMeterData.findFirst({
-        where,
-        orderBy: { createdAt: 'desc' }
-      }),
-      prisma.smartMeterData.findFirst({
-        where,
-        orderBy: { createdAt: 'asc' }
-      }),
-      prisma.$queryRaw<{
-        machine: boolean | null
-        count: number
-      }[]>(Prisma.sql`
-        SELECT
-          "machine",
-          COUNT(*)::int AS "count"
+      prisma.smartMeterData.findFirst({ where, orderBy: { createdAt: 'desc' } }),
+      prisma.smartMeterData.findFirst({ where, orderBy: { createdAt: 'asc' } }),
+      prisma.$queryRaw<{ machine: boolean | null; count: number }[]>(Prisma.sql`
+        SELECT "machine", COUNT(*)::int AS "count"
         FROM "SmartMeterData"
         WHERE ${whereSql}
         GROUP BY "machine"
@@ -429,28 +332,30 @@ router.get('/:deviceId/analytics/summary', async (req, res) => {
       },
       samples,
       averages: {
-        voltage1: toNumber(summary?.voltage1Avg),
-        voltage2: toNumber(summary?.voltage2Avg),
-        current: toNumber(summary?.currentAvg),
-        powerFactor: toNumber(summary?.powerFactorAvg),
-        power: toNumber(summary?.powerAvg),
-        frequency: toNumber(summary?.frequencyAvg)
+        voltagePhase1: toNumber(summary?.voltagePhase1Avg),
+        voltagePhase2: toNumber(summary?.voltagePhase2Avg),
+        voltagePhase3: toNumber(summary?.voltagePhase3Avg),
+        voltageTotal: toNumber(summary?.voltageTotalAvg),
+        currentTotal: toNumber(summary?.currentTotalAvg),
+        powerFactorTotal: toNumber(summary?.powerFactorTotalAvg),
+        powerTotalActive: toNumber(summary?.powerTotalActiveAvg),
+        frequencyHz: toNumber(summary?.frequencyHzAvg)
       },
       minimums: {
-        voltage1: toNumber(summary?.voltage1Min),
-        voltage2: toNumber(summary?.voltage2Min),
-        current: toNumber(summary?.currentMin),
-        powerFactor: toNumber(summary?.powerFactorMin),
-        power: toNumber(summary?.powerMin),
-        frequency: toNumber(summary?.frequencyMin)
+        voltagePhase1: toNumber(summary?.voltagePhase1Min),
+        voltageTotal: toNumber(summary?.voltageTotalMin),
+        currentTotal: toNumber(summary?.currentTotalMin),
+        powerFactorTotal: toNumber(summary?.powerFactorTotalMin),
+        powerTotalActive: toNumber(summary?.powerTotalActiveMin),
+        frequencyHz: toNumber(summary?.frequencyHzMin)
       },
       maximums: {
-        voltage1: toNumber(summary?.voltage1Max),
-        voltage2: toNumber(summary?.voltage2Max),
-        current: toNumber(summary?.currentMax),
-        powerFactor: toNumber(summary?.powerFactorMax),
-        power: toNumber(summary?.powerMax),
-        frequency: toNumber(summary?.frequencyMax)
+        voltagePhase1: toNumber(summary?.voltagePhase1Max),
+        voltageTotal: toNumber(summary?.voltageTotalMax),
+        currentTotal: toNumber(summary?.currentTotalMax),
+        powerFactorTotal: toNumber(summary?.powerFactorTotalMax),
+        powerTotalActive: toNumber(summary?.powerTotalActiveMax),
+        frequencyHz: toNumber(summary?.frequencyHzMax)
       },
       machine: {
         on: machineOn,
@@ -469,8 +374,6 @@ router.get('/:deviceId/analytics/summary', async (req, res) => {
 
 /**
  * GET /api/smartmeter/:deviceId/analytics/series
- * Get time-series analytics
- * Query: from, to (ISO date), bucket=minute|hour|day|week|month, meter
  */
 router.get('/:deviceId/analytics/series', async (req, res) => {
   try {
@@ -481,67 +384,47 @@ router.get('/:deviceId/analytics/series', async (req, res) => {
     const bucketValue = getQueryString(req.query.bucket)
 
     const fromDate = parseDateParam(fromValue)
-    if (fromValue && !fromDate) {
-      return res.status(400).json({ error: 'Invalid from date' })
-    }
+    if (fromValue && !fromDate) return res.status(400).json({ error: 'Invalid from date' })
 
     const toDate = parseDateParam(toValue)
-    if (toValue && !toDate) {
-      return res.status(400).json({ error: 'Invalid to date' })
-    }
+    if (toValue && !toDate) return res.status(400).json({ error: 'Invalid to date' })
 
     const bucket = parseBucket(bucketValue)
-    if (!bucket) {
-      return res.status(400).json({ error: 'Invalid bucket value' })
-    }
+    if (!bucket) return res.status(400).json({ error: 'Invalid bucket value' })
 
     const device = await prisma.device.findUnique({
       where: { deviceId },
       select: { deviceId: true, deviceType: true }
     })
 
-    if (!device) {
-      return res.status(404).json({ error: 'Device not found' })
-    }
+    if (!device) return res.status(404).json({ error: 'Device not found' })
+    if (device.deviceType !== 'SMART_METER') return res.status(400).json({ error: 'Not a smart meter device' })
 
-    if (device.deviceType !== 'SMART_METER') {
-      return res.status(400).json({ error: 'Not a smart meter device' })
-    }
-
-    const conditions: Prisma.Sql[] = [
-      Prisma.sql`"deviceId" = ${deviceId}`
-    ]
-    if (meterValue) {
-      conditions.push(Prisma.sql`"meter" = ${meterValue}`)
-    }
-    if (fromDate) {
-      conditions.push(Prisma.sql`"createdAt" >= ${fromDate}`)
-    }
-    if (toDate) {
-      conditions.push(Prisma.sql`"createdAt" <= ${toDate}`)
-    }
-
+    const conditions: Prisma.Sql[] = [Prisma.sql`"deviceId" = ${deviceId}`]
+    if (meterValue) conditions.push(Prisma.sql`"meter" = ${meterValue}`)
+    if (fromDate) conditions.push(Prisma.sql`"createdAt" >= ${fromDate}`)
+    if (toDate) conditions.push(Prisma.sql`"createdAt" <= ${toDate}`)
     const whereSql = Prisma.join(conditions, ' AND ')
 
     const rows = await prisma.$queryRaw<{
       bucket: Date
-      voltage1Avg: number | null
-      voltage2Avg: number | null
-      currentAvg: number | null
-      powerFactorAvg: number | null
-      powerAvg: number | null
-      frequencyAvg: number | null
+      voltagePhase1Avg: number | null
+      voltageTotalAvg: number | null
+      currentTotalAvg: number | null
+      powerFactorTotalAvg: number | null
+      powerTotalActiveAvg: number | null
+      frequencyHzAvg: number | null
       machineOnRatio: number | null
       count: number
     }[]>(Prisma.sql`
       SELECT
         date_trunc(${bucket}, "createdAt") AS "bucket",
-        AVG("voltage1") AS "voltage1Avg",
-        AVG("voltage2") AS "voltage2Avg",
-        AVG("current") AS "currentAvg",
-        AVG("powerFactor") AS "powerFactorAvg",
-        AVG("power") AS "powerAvg",
-        AVG("frequency") AS "frequencyAvg",
+        AVG("voltagePhase1")    AS "voltagePhase1Avg",
+        AVG("voltageTotal")     AS "voltageTotalAvg",
+        AVG("currentTotal")     AS "currentTotalAvg",
+        AVG("powerFactorTotal") AS "powerFactorTotalAvg",
+        AVG("powerTotalActive") AS "powerTotalActiveAvg",
+        AVG("frequencyHz")      AS "frequencyHzAvg",
         AVG(CASE WHEN "machine" = true THEN 1 ELSE 0 END) AS "machineOnRatio",
         COUNT(*)::int AS "count"
       FROM "SmartMeterData"
@@ -554,16 +437,14 @@ router.get('/:deviceId/analytics/series', async (req, res) => {
       bucket: row.bucket instanceof Date ? row.bucket.toISOString() : String(row.bucket),
       count: Number(row.count),
       averages: {
-        voltage1: toNumber(row.voltage1Avg),
-        voltage2: toNumber(row.voltage2Avg),
-        current: toNumber(row.currentAvg),
-        powerFactor: toNumber(row.powerFactorAvg),
-        power: toNumber(row.powerAvg),
-        frequency: toNumber(row.frequencyAvg)
+        voltagePhase1: toNumber(row.voltagePhase1Avg),
+        voltageTotal: toNumber(row.voltageTotalAvg),
+        currentTotal: toNumber(row.currentTotalAvg),
+        powerFactorTotal: toNumber(row.powerFactorTotalAvg),
+        powerTotalActive: toNumber(row.powerTotalActiveAvg),
+        frequencyHz: toNumber(row.frequencyHzAvg)
       },
-      machine: {
-        onRatio: toNumber(row.machineOnRatio)
-      }
+      machine: { onRatio: toNumber(row.machineOnRatio) }
     }))
 
     res.json({
@@ -584,161 +465,203 @@ router.get('/:deviceId/analytics/series', async (req, res) => {
 
 /**
  * GET /api/smartmeter/:deviceId/analytics/live
- * Get live windowed stats + latest reading
- * Query: windowMinutes (default 15), meter
  */
 router.get('/:deviceId/analytics/live', async (req, res) => {
   try {
     const { deviceId } = req.params
-    const windowValue = getQueryString(req.query.windowMinutes)
     const meterValue = getQueryString(req.query.meter)
-    const windowMinutes = parsePositiveInt(windowValue, 15, 10080)
-
-    if (windowValue && !windowMinutes) {
-      return res.status(400).json({ error: 'Invalid windowMinutes' })
-    }
+    const prefixMatch = deviceId.match(/(\d{4})$/)
+    const parameterPrefix = prefixMatch?.[1] ?? deviceId.slice(-4)
 
     const device = await prisma.device.findUnique({
       where: { deviceId },
       select: { deviceId: true, deviceType: true }
     })
 
-    if (!device) {
-      return res.status(404).json({ error: 'Device not found' })
+    if (!device) return res.status(404).json({ error: 'Device not found' })
+    if (device.deviceType !== 'SMART_METER') return res.status(400).json({ error: 'Not a smart meter device' })
+
+    const where: any = { deviceId }
+    if (meterValue) where.meter = meterValue
+
+    const latest = await prisma.smartMeterData.findFirst({
+      where,
+      orderBy: { createdAt: 'desc' }
+    })
+    const snapshot = await getSmartMeterLiveSnapshotStored(deviceId)
+
+    if (!latest) {
+      return res.json({
+        deviceId,
+        meter: meterValue || null,
+        parameterPrefix,
+        prefixedParameters: null
+      })
     }
 
-    if (device.deviceType !== 'SMART_METER') {
-      return res.status(400).json({ error: 'Not a smart meter device' })
+    const pickPhase = (values: number[] | undefined, index: number): number | null => {
+      if (!values || values.length <= index) return null
+      const value = Number(values[index])
+      return Number.isFinite(value) ? value : null
     }
 
-    const now = new Date()
-    const fromDate = new Date(now.getTime() - windowMinutes * 60 * 1000)
-
-    const conditions: Prisma.Sql[] = [
-      Prisma.sql`"deviceId" = ${deviceId}`,
-      Prisma.sql`"createdAt" >= ${fromDate}`
-    ]
-    if (meterValue) {
-      conditions.push(Prisma.sql`"meter" = ${meterValue}`)
+    const pickLast = (values: number[] | undefined): number | null => {
+      if (!values || values.length === 0) return null
+      const value = Number(values[values.length - 1])
+      return Number.isFinite(value) ? value : null
     }
 
-    const whereSql = Prisma.join(conditions, ' AND ')
+    const voltagePhase1 = pickPhase(snapshot?.voltagePhases, 0) ?? latest.voltagePhase1 ?? null
+    const voltagePhase2 = pickPhase(snapshot?.voltagePhases, 1) ?? latest.voltagePhase2 ?? null
+    const voltagePhase3 = pickPhase(snapshot?.voltagePhases, 2) ?? latest.voltagePhase3 ?? null
+    const voltageTotal  = pickLast(snapshot?.voltagePhases)     ?? latest.voltageTotal  ?? null
 
-    const where: any = { deviceId, createdAt: { gte: fromDate } }
-    if (meterValue) {
-      where.meter = meterValue
+    const currentPhase1 = pickPhase(snapshot?.currentPhases, 0) ?? latest.currentPhase1 ?? null
+    const currentPhase2 = pickPhase(snapshot?.currentPhases, 1) ?? latest.currentPhase2 ?? null
+    const currentPhase3 = pickPhase(snapshot?.currentPhases, 2) ?? latest.currentPhase3 ?? null
+    const currentTotal  = pickLast(snapshot?.currentPhases)     ?? latest.currentTotal  ?? null
+
+    const powerPhase1      = pickPhase(snapshot?.powerPhases, 0) ?? latest.powerPhase1      ?? null
+    const powerPhase2      = pickPhase(snapshot?.powerPhases, 1) ?? latest.powerPhase2      ?? null
+    const powerPhase3      = pickPhase(snapshot?.powerPhases, 2) ?? latest.powerPhase3      ?? null
+    const powerTotalActive = pickLast(snapshot?.powerPhases)     ?? latest.powerTotalActive ?? null
+
+    const pfPhase1      = pickPhase(snapshot?.powerFactorPhases, 0) ?? latest.powerFactorPhase1 ?? null
+    const pfPhase2      = pickPhase(snapshot?.powerFactorPhases, 1) ?? latest.powerFactorPhase2 ?? null
+    const pfPhase3      = pickPhase(snapshot?.powerFactorPhases, 2) ?? latest.powerFactorPhase3 ?? null
+    const pfTotal       = pickLast(snapshot?.powerFactorPhases)     ?? latest.powerFactorTotal  ?? null
+
+    const roundTo = (value: number | null, decimals: number): number | null => {
+      if (value === null || !Number.isFinite(value)) return null
+      const scale = 10 ** decimals
+      return Math.round(value * scale) / scale
     }
 
-    const [summaryRows, latest, machineCounts] = await Promise.all([
-      prisma.$queryRaw<{
-        samples: number
-        voltage1Avg: number | null
-        voltage2Avg: number | null
-        currentAvg: number | null
-        powerFactorAvg: number | null
-        powerAvg: number | null
-        frequencyAvg: number | null
-        voltage1Min: number | null
-        voltage2Min: number | null
-        currentMin: number | null
-        powerFactorMin: number | null
-        powerMin: number | null
-        frequencyMin: number | null
-        voltage1Max: number | null
-        voltage2Max: number | null
-        currentMax: number | null
-        powerFactorMax: number | null
-        powerMax: number | null
-        frequencyMax: number | null
-      }[]>(Prisma.sql`
-        SELECT
-          COUNT(*)::int AS "samples",
-          AVG("voltage1") AS "voltage1Avg",
-          AVG("voltage2") AS "voltage2Avg",
-          AVG("current") AS "currentAvg",
-          AVG("powerFactor") AS "powerFactorAvg",
-          AVG("power") AS "powerAvg",
-          AVG("frequency") AS "frequencyAvg",
-          MIN("voltage1") AS "voltage1Min",
-          MIN("voltage2") AS "voltage2Min",
-          MIN("current") AS "currentMin",
-          MIN("powerFactor") AS "powerFactorMin",
-          MIN("power") AS "powerMin",
-          MIN("frequency") AS "frequencyMin",
-          MAX("voltage1") AS "voltage1Max",
-          MAX("voltage2") AS "voltage2Max",
-          MAX("current") AS "currentMax",
-          MAX("powerFactor") AS "powerFactorMax",
-          MAX("power") AS "powerMax",
-          MAX("frequency") AS "frequencyMax"
-        FROM "SmartMeterData"
-        WHERE ${whereSql}
-      `),
-      prisma.smartMeterData.findFirst({
-        where,
-        orderBy: { createdAt: 'desc' }
-      }),
-      prisma.$queryRaw<{
-        machine: boolean | null
-        count: number
-      }[]>(Prisma.sql`
-        SELECT
-          "machine",
-          COUNT(*)::int AS "count"
-        FROM "SmartMeterData"
-        WHERE ${whereSql}
-        GROUP BY "machine"
-      `)
-    ])
+    // Apparent power
+    const apparentPhase1 = voltagePhase1 !== null && currentPhase1 !== null ? Math.abs(voltagePhase1 * currentPhase1) : null
+    const apparentPhase2 = voltagePhase2 !== null && currentPhase2 !== null ? Math.abs(voltagePhase2 * currentPhase2) : null
+    const apparentPhase3 = voltagePhase3 !== null && currentPhase3 !== null ? Math.abs(voltagePhase3 * currentPhase3) : null
 
-    const summary = summaryRows[0]
-    const samples = summary ? Number(summary.samples) : 0
-    const machineTotals = machineCounts.reduce((sum, row) => sum + Number(row.count), 0)
-    const machineOn = machineCounts.find((row) => row.machine === true)?.count ?? 0
-    const machineOff = machineCounts.find((row) => row.machine === false)?.count ?? 0
-    const machineUnknown = machineCounts.find((row) => row.machine === null)?.count ?? 0
-    const machineOnRatio = machineTotals > 0 ? machineOn / machineTotals : null
+    const apparentFromPhases = [apparentPhase1, apparentPhase2, apparentPhase3]
+      .filter((v): v is number => v !== null)
+      .reduce((sum, v) => sum + v, 0)
+
+    const apparentFromTotals =
+      voltageTotal !== null && currentTotal !== null ? Math.abs(voltageTotal * currentTotal) : null
+
+    const apparentPowerValue = apparentFromPhases > 0 ? apparentFromPhases : apparentFromTotals
+
+    // Reactive power
+    const reactiveFrom = (apparent: number | null, active: number | null): number | null => {
+      if (apparent === null || active === null) return null
+      const qSquared = apparent * apparent - active * active
+      if (!Number.isFinite(qSquared)) return null
+      return Math.sqrt(Math.max(qSquared, 0))
+    }
+
+    const reactivePhase1 = reactiveFrom(apparentPhase1, powerPhase1)
+    const reactivePhase2 = reactiveFrom(apparentPhase2, powerPhase2)
+    const reactivePhase3 = reactiveFrom(apparentPhase3, powerPhase3)
+
+    const reactiveFromPhases = [reactivePhase1, reactivePhase2, reactivePhase3]
+      .filter((v): v is number => v !== null)
+      .reduce((sum, v) => sum + v, 0)
+
+    const reactivePowerValue =
+      reactiveFromPhases > 0
+        ? reactiveFromPhases
+        : reactiveFrom(apparentPowerValue, powerTotalActive)
+
+    const energyFromPower = (activePower: number | null): number | null =>
+      activePower === null ? null : Math.abs(activePower) / 1000
+
+    const live = {
+      timestamp: latest.createdAt,
+      status: latest.status,
+      machine: latest.machine,
+      fault: latest.fault,
+      temperatureC: latest.temperatureC,
+      frequencyHz: latest.frequencyHz,
+      voltage: {
+        phase1: voltagePhase1,
+        phase2: voltagePhase2,
+        phase3: voltagePhase3,
+        total: voltageTotal
+      },
+      current: {
+        phase1: currentPhase1,
+        phase2: currentPhase2,
+        phase3: currentPhase3,
+        total: currentTotal
+      },
+      power: {
+        phase1: powerPhase1,
+        phase2: powerPhase2,
+        phase3: powerPhase3,
+        totalActive: powerTotalActive
+      },
+      powerFactor: {
+        phase1: pfPhase1,
+        phase2: pfPhase2,
+        phase3: pfPhase3,
+        total: pfTotal
+      },
+      energyConsumption: {
+        phaseR: roundTo(energyFromPower(powerPhase1), 3),
+        phaseY: roundTo(energyFromPower(powerPhase2), 3),
+        phaseB: roundTo(energyFromPower(powerPhase3), 3),
+        total3Phase: roundTo(
+          energyFromPower(powerTotalActive) ??
+            [powerPhase1, powerPhase2, powerPhase3]
+              .filter((v): v is number => v !== null)
+              .reduce((sum, p) => sum + Math.abs(p) / 1000, 0),
+          3
+        )
+      },
+      additional: {
+        reactivePower: roundTo(reactivePowerValue, 2),
+        apparentPower: roundTo(apparentPowerValue, 2),
+        frequencyHz: latest.frequencyHz,
+        temperatureC: latest.temperatureC
+      }
+    }
+
+    const prefixedParameters: Record<string, unknown> = {
+      [`${parameterPrefix}_timestamp`]:             live.timestamp,
+      [`${parameterPrefix}_status`]:                live.status,
+      [`${parameterPrefix}_machine`]:               live.machine,
+      [`${parameterPrefix}_fault`]:                 live.fault,
+      [`${parameterPrefix}_temperatureC`]:          live.temperatureC,
+      [`${parameterPrefix}_frequencyHz`]:           live.frequencyHz,
+      [`${parameterPrefix}_voltage_phase1`]:        live.voltage.phase1,
+      [`${parameterPrefix}_voltage_phase2`]:        live.voltage.phase2,
+      [`${parameterPrefix}_voltage_phase3`]:        live.voltage.phase3,
+      [`${parameterPrefix}_voltage_total`]:         live.voltage.total,
+      [`${parameterPrefix}_current_phase1`]:        live.current.phase1,
+      [`${parameterPrefix}_current_phase2`]:        live.current.phase2,
+      [`${parameterPrefix}_current_phase3`]:        live.current.phase3,
+      [`${parameterPrefix}_current_total`]:         live.current.total,
+      [`${parameterPrefix}_power_phase1`]:          live.power.phase1,
+      [`${parameterPrefix}_power_phase2`]:          live.power.phase2,
+      [`${parameterPrefix}_power_phase3`]:          live.power.phase3,
+      [`${parameterPrefix}_power_totalActive`]:     live.power.totalActive,
+      [`${parameterPrefix}_powerFactor_phase1`]:    live.powerFactor.phase1,
+      [`${parameterPrefix}_powerFactor_phase2`]:    live.powerFactor.phase2,
+      [`${parameterPrefix}_powerFactor_phase3`]:    live.powerFactor.phase3,
+      [`${parameterPrefix}_powerFactor_total`]:     live.powerFactor.total,
+      [`${parameterPrefix}_energy_phaseR_kWh`]:     live.energyConsumption.phaseR,
+      [`${parameterPrefix}_energy_phaseY_kWh`]:     live.energyConsumption.phaseY,
+      [`${parameterPrefix}_energy_phaseB_kWh`]:     live.energyConsumption.phaseB,
+      [`${parameterPrefix}_energy_total3Phase_kWh`]: live.energyConsumption.total3Phase,
+      [`${parameterPrefix}_reactivePower_var`]:     live.additional.reactivePower,
+      [`${parameterPrefix}_apparentPower_VA`]:      live.additional.apparentPower
+    }
 
     res.json({
       deviceId,
-      meter: meterValue || null,
-      windowMinutes,
-      range: {
-        from: fromDate.toISOString(),
-        to: now.toISOString()
-      },
-      samples,
-      averages: {
-        voltage1: toNumber(summary?.voltage1Avg),
-        voltage2: toNumber(summary?.voltage2Avg),
-        current: toNumber(summary?.currentAvg),
-        powerFactor: toNumber(summary?.powerFactorAvg),
-        power: toNumber(summary?.powerAvg),
-        frequency: toNumber(summary?.frequencyAvg)
-      },
-      minimums: {
-        voltage1: toNumber(summary?.voltage1Min),
-        voltage2: toNumber(summary?.voltage2Min),
-        current: toNumber(summary?.currentMin),
-        powerFactor: toNumber(summary?.powerFactorMin),
-        power: toNumber(summary?.powerMin),
-        frequency: toNumber(summary?.frequencyMin)
-      },
-      maximums: {
-        voltage1: toNumber(summary?.voltage1Max),
-        voltage2: toNumber(summary?.voltage2Max),
-        current: toNumber(summary?.currentMax),
-        powerFactor: toNumber(summary?.powerFactorMax),
-        power: toNumber(summary?.powerMax),
-        frequency: toNumber(summary?.frequencyMax)
-      },
-      machine: {
-        on: machineOn,
-        off: machineOff,
-        unknown: machineUnknown,
-        onRatio: machineOnRatio
-      },
-      latest
+      meter: latest.meter || snapshot?.meter || meterValue || null,
+      parameterPrefix,
+      prefixedParameters
     })
   } catch (error) {
     console.error('❌ Error fetching smart meter live analytics:', error)
@@ -748,8 +671,6 @@ router.get('/:deviceId/analytics/live', async (req, res) => {
 
 /**
  * GET /api/smartmeter/:deviceId/analytics/trend
- * Get continuous trend series for a rolling window
- * Query: minutes (default 120), bucket=minute|hour|day|week|month, meter
  */
 router.get('/:deviceId/analytics/trend', async (req, res) => {
   try {
@@ -759,61 +680,49 @@ router.get('/:deviceId/analytics/trend', async (req, res) => {
     const bucketValue = getQueryString(req.query.bucket)
     const minutes = parsePositiveInt(minutesValue, 120, 10080)
 
-    if (minutesValue && !minutes) {
-      return res.status(400).json({ error: 'Invalid minutes value' })
-    }
+    if (minutesValue && !minutes) return res.status(400).json({ error: 'Invalid minutes value' })
 
     const bucket = bucketValue ? parseBucket(bucketValue) : 'minute'
-    if (!bucket) {
-      return res.status(400).json({ error: 'Invalid bucket value' })
-    }
+    if (!bucket) return res.status(400).json({ error: 'Invalid bucket value' })
 
     const device = await prisma.device.findUnique({
       where: { deviceId },
       select: { deviceId: true, deviceType: true }
     })
 
-    if (!device) {
-      return res.status(404).json({ error: 'Device not found' })
-    }
-
-    if (device.deviceType !== 'SMART_METER') {
-      return res.status(400).json({ error: 'Not a smart meter device' })
-    }
+    if (!device) return res.status(404).json({ error: 'Device not found' })
+    if (device.deviceType !== 'SMART_METER') return res.status(400).json({ error: 'Not a smart meter device' })
 
     const now = new Date()
-    const fromDate = new Date(now.getTime() - minutes * 60 * 1000)
+    const fromDate = new Date(now.getTime() - (minutes ?? 120) * 60 * 1000)
 
     const conditions: Prisma.Sql[] = [
       Prisma.sql`"deviceId" = ${deviceId}`,
       Prisma.sql`"createdAt" >= ${fromDate}`,
       Prisma.sql`"createdAt" <= ${now}`
     ]
-    if (meterValue) {
-      conditions.push(Prisma.sql`"meter" = ${meterValue}`)
-    }
-
+    if (meterValue) conditions.push(Prisma.sql`"meter" = ${meterValue}`)
     const whereSql = Prisma.join(conditions, ' AND ')
 
     const rows = await prisma.$queryRaw<{
       bucket: Date
-      voltage1Avg: number | null
-      voltage2Avg: number | null
-      currentAvg: number | null
-      powerFactorAvg: number | null
-      powerAvg: number | null
-      frequencyAvg: number | null
+      voltagePhase1Avg: number | null
+      voltageTotalAvg: number | null
+      currentTotalAvg: number | null
+      powerFactorTotalAvg: number | null
+      powerTotalActiveAvg: number | null
+      frequencyHzAvg: number | null
       machineOnRatio: number | null
       count: number
     }[]>(Prisma.sql`
       SELECT
         date_trunc(${bucket}, "createdAt") AS "bucket",
-        AVG("voltage1") AS "voltage1Avg",
-        AVG("voltage2") AS "voltage2Avg",
-        AVG("current") AS "currentAvg",
-        AVG("powerFactor") AS "powerFactorAvg",
-        AVG("power") AS "powerAvg",
-        AVG("frequency") AS "frequencyAvg",
+        AVG("voltagePhase1")    AS "voltagePhase1Avg",
+        AVG("voltageTotal")     AS "voltageTotalAvg",
+        AVG("currentTotal")     AS "currentTotalAvg",
+        AVG("powerFactorTotal") AS "powerFactorTotalAvg",
+        AVG("powerTotalActive") AS "powerTotalActiveAvg",
+        AVG("frequencyHz")      AS "frequencyHzAvg",
         AVG(CASE WHEN "machine" = true THEN 1 ELSE 0 END) AS "machineOnRatio",
         COUNT(*)::int AS "count"
       FROM "SmartMeterData"
@@ -826,16 +735,14 @@ router.get('/:deviceId/analytics/trend', async (req, res) => {
       bucket: row.bucket instanceof Date ? row.bucket.toISOString() : String(row.bucket),
       count: Number(row.count),
       averages: {
-        voltage1: toNumber(row.voltage1Avg),
-        voltage2: toNumber(row.voltage2Avg),
-        current: toNumber(row.currentAvg),
-        powerFactor: toNumber(row.powerFactorAvg),
-        power: toNumber(row.powerAvg),
-        frequency: toNumber(row.frequencyAvg)
+        voltagePhase1: toNumber(row.voltagePhase1Avg),
+        voltageTotal: toNumber(row.voltageTotalAvg),
+        currentTotal: toNumber(row.currentTotalAvg),
+        powerFactorTotal: toNumber(row.powerFactorTotalAvg),
+        powerTotalActive: toNumber(row.powerTotalActiveAvg),
+        frequencyHz: toNumber(row.frequencyHzAvg)
       },
-      machine: {
-        onRatio: toNumber(row.machineOnRatio)
-      }
+      machine: { onRatio: toNumber(row.machineOnRatio) }
     }))
 
     res.json({
@@ -857,7 +764,6 @@ router.get('/:deviceId/analytics/trend', async (req, res) => {
 
 /**
  * GET /api/smartmeter/:deviceId/data
- * Get latest smart meter readings
  */
 router.get('/:deviceId/data', async (req, res) => {
   try {
@@ -866,19 +772,11 @@ router.get('/:deviceId/data', async (req, res) => {
 
     const device = await prisma.device.findUnique({
       where: { deviceId },
-      select: {
-        deviceId: true,
-        deviceType: true
-      }
+      select: { deviceId: true, deviceType: true }
     })
 
-    if (!device) {
-      return res.status(404).json({ error: 'Device not found' })
-    }
-
-    if (device.deviceType !== 'SMART_METER') {
-      return res.status(400).json({ error: 'Not a smart meter device' })
-    }
+    if (!device) return res.status(404).json({ error: 'Device not found' })
+    if (device.deviceType !== 'SMART_METER') return res.status(400).json({ error: 'Not a smart meter device' })
 
     const data = await prisma.smartMeterData.findMany({
       where: { deviceId },
@@ -886,10 +784,7 @@ router.get('/:deviceId/data', async (req, res) => {
       take: parseInt(limit as string)
     })
 
-    res.json({ 
-      deviceId: device.deviceId,
-      data 
-    })
+    res.json({ deviceId: device.deviceId, data })
   } catch (error) {
     console.error('❌ Error fetching smart meter data:', error)
     res.status(500).json({ error: 'Failed to fetch data' })
@@ -898,7 +793,6 @@ router.get('/:deviceId/data', async (req, res) => {
 
 /**
  * GET /api/smartmeter/:deviceId/settings
- * Get smart meter settings
  */
 router.get('/:deviceId/settings', async (req, res) => {
   try {
@@ -906,28 +800,17 @@ router.get('/:deviceId/settings', async (req, res) => {
 
     const device = await prisma.device.findUnique({
       where: { deviceId },
-      select: {
-        deviceId: true,
-        deviceType: true
-      }
+      select: { deviceId: true, deviceType: true }
     })
 
-    if (!device) {
-      return res.status(404).json({ error: 'Device not found' })
-    }
-
-    if (device.deviceType !== 'SMART_METER') {
-      return res.status(400).json({ error: 'Not a smart meter device' })
-    }
+    if (!device) return res.status(404).json({ error: 'Device not found' })
+    if (device.deviceType !== 'SMART_METER') return res.status(400).json({ error: 'Not a smart meter device' })
 
     const settings = await prisma.smartMeterSettings.findUnique({
       where: { deviceId }
     })
 
-    res.json({ 
-      deviceId: device.deviceId,
-      settings: settings || null
-    })
+    res.json({ deviceId: device.deviceId, settings: settings || null })
   } catch (error) {
     console.error('❌ Error fetching smart meter settings:', error)
     res.status(500).json({ error: 'Failed to fetch settings' })
@@ -936,7 +819,6 @@ router.get('/:deviceId/settings', async (req, res) => {
 
 /**
  * GET /api/smartmeter/:deviceId/latest
- * Get latest smart meter reading
  */
 router.get('/:deviceId/latest', async (req, res) => {
   try {
@@ -952,13 +834,8 @@ router.get('/:deviceId/latest', async (req, res) => {
       }
     })
 
-    if (!device) {
-      return res.status(404).json({ error: 'Device not found' })
-    }
-
-    if (device.deviceType !== 'SMART_METER') {
-      return res.status(400).json({ error: 'Not a smart meter device' })
-    }
+    if (!device) return res.status(404).json({ error: 'Device not found' })
+    if (device.deviceType !== 'SMART_METER') return res.status(400).json({ error: 'Not a smart meter device' })
 
     const latestData = await prisma.smartMeterData.findFirst({
       where: { deviceId },
@@ -969,7 +846,7 @@ router.get('/:deviceId/latest', async (req, res) => {
       where: { deviceId }
     })
 
-    res.json({ 
+    res.json({
       device: {
         deviceId: device.deviceId,
         deviceType: device.deviceType,

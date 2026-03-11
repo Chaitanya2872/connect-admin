@@ -5,6 +5,8 @@ import { prisma } from '../db/prisma'
 import { getSmartMeterLiveSnapshotStored } from '../services/smartmeter.service'
 
 const router = Router()
+const SMART_METER_STALE_MS = 3 * 60 * 1000
+const SMART_METER_STALE_SECONDS = SMART_METER_STALE_MS / 1000
 
 const getQueryString = (value: unknown): string | undefined => {
   if (Array.isArray(value)) {
@@ -62,6 +64,131 @@ const toNumber = (value: unknown): number | null => {
   const n = Number(value)
   return Number.isFinite(n) ? n : null
 }
+
+const isSmartMeterDataStale = (createdAt?: Date | null): boolean => {
+  if (!createdAt) return true
+  return Date.now() - createdAt.getTime() > SMART_METER_STALE_MS
+}
+
+const connectivityStatusFromFreshness = (createdAt?: Date | null): 'on' | 'off' =>
+  isSmartMeterDataStale(createdAt) ? 'off' : 'on'
+
+
+const SMART_METER_PREFIX_SUFFIXES = [
+  'timestamp',
+  'status',
+  'machine',
+  'fault',
+  'temperatureC',
+  'frequencyHz',
+  'voltage_phase1',
+  'voltage_phase2',
+  'voltage_phase3',
+  'voltage_total',
+  'current_phase1',
+  'current_phase2',
+  'current_phase3',
+  'current_total',
+  'power_phase1',
+  'power_phase2',
+  'power_phase3',
+  'power_totalActive',
+  'powerFactor_phase1',
+  'powerFactor_phase2',
+  'powerFactor_phase3',
+  'powerFactor_total',
+  'energy_phaseR_kWh',
+  'energy_phaseY_kWh',
+  'energy_phaseB_kWh',
+  'energy_total3Phase_kWh',
+  'reactivePower_var',
+  'apparentPower_VA'
+]
+
+const buildNullPrefixedParameters = (parameterPrefix: string): Record<string, null> => {
+  const result: Record<string, null> = {}
+  for (const suffix of SMART_METER_PREFIX_SUFFIXES) {
+    result[`${parameterPrefix}_${suffix}`] = null
+  }
+  return result
+}
+
+const SMART_METER_DATA_FIELDS = [
+  'id',
+  'deviceId',
+  'meter',
+  'status',
+  'machine',
+  'fault',
+  'temperatureC',
+  'frequencyHz',
+  'voltagePhase1',
+  'voltagePhase2',
+  'voltagePhase3',
+  'voltageTotal',
+  'currentPhase1',
+  'currentPhase2',
+  'currentPhase3',
+  'currentTotal',
+  'powerPhase1',
+  'powerPhase2',
+  'powerPhase3',
+  'powerTotalActive',
+  'powerFactorPhase1',
+  'powerFactorPhase2',
+  'powerFactorPhase3',
+  'powerFactorTotal',
+  'energyPhaseR',
+  'energyPhaseY',
+  'energyPhaseB',
+  'energyTotal3Phase',
+  'reactivePower',
+  'apparentPower',
+  'createdAt'
+]
+
+const buildNullSmartMeterData = (): Record<string, null> => {
+  const result: Record<string, null> = {}
+  for (const field of SMART_METER_DATA_FIELDS) {
+    result[field] = null
+  }
+  return result
+}
+
+const buildNullSummaryMetrics = () => ({
+  averages: {
+    voltagePhase1: null,
+    voltagePhase2: null,
+    voltagePhase3: null,
+    voltageTotal: null,
+    currentTotal: null,
+    powerFactorTotal: null,
+    powerTotalActive: null,
+    frequencyHz: null
+  },
+  minimums: {
+    voltagePhase1: null,
+    voltageTotal: null,
+    currentTotal: null,
+    powerFactorTotal: null,
+    powerTotalActive: null,
+    frequencyHz: null
+  },
+  maximums: {
+    voltagePhase1: null,
+    voltageTotal: null,
+    currentTotal: null,
+    powerFactorTotal: null,
+    powerTotalActive: null,
+    frequencyHz: null
+  },
+  machine: {
+    on: null,
+    off: null,
+    unknown: null,
+    onRatio: null
+  }
+})
 
 /**
  * POST /api/smartmeter/:thingId/config
@@ -255,6 +382,32 @@ router.get('/:deviceId/analytics/summary', async (req, res) => {
     if (fromDate) conditions.push(Prisma.sql`"createdAt" >= ${fromDate}`)
     if (toDate) conditions.push(Prisma.sql`"createdAt" <= ${toDate}`)
     const whereSql = Prisma.join(conditions, ' AND ')
+    const latestForStaleness = await prisma.smartMeterData.findFirst({
+      where: { deviceId, ...(meterValue ? { meter: meterValue } : {}) },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true }
+    })
+    if (isSmartMeterDataStale(latestForStaleness?.createdAt)) {
+      const nullMetrics = buildNullSummaryMetrics()
+      return res.json({
+        deviceId,
+        meter: meterValue || null,
+        range: {
+          from: fromDate ? fromDate.toISOString() : null,
+          to: toDate ? toDate.toISOString() : null
+        },
+        staleAfterSeconds: SMART_METER_STALE_SECONDS,
+        dataStale: true,
+        lastSavedAt: latestForStaleness?.createdAt?.toISOString() || null,
+        samples: null,
+        averages: nullMetrics.averages,
+        minimums: nullMetrics.minimums,
+        maximums: nullMetrics.maximums,
+        machine: nullMetrics.machine,
+        first: null,
+        latest: null
+      })
+    }
 
     const [summaryRows, latest, first, machineCounts] = await Promise.all([
       prisma.$queryRaw<{
@@ -330,6 +483,9 @@ router.get('/:deviceId/analytics/summary', async (req, res) => {
         from: fromDate ? fromDate.toISOString() : null,
         to: toDate ? toDate.toISOString() : null
       },
+      staleAfterSeconds: SMART_METER_STALE_SECONDS,
+      dataStale: false,
+      lastSavedAt: latest?.createdAt?.toISOString() || null,
       samples,
       averages: {
         voltagePhase1: toNumber(summary?.voltagePhase1Avg),
@@ -405,6 +561,26 @@ router.get('/:deviceId/analytics/series', async (req, res) => {
     if (fromDate) conditions.push(Prisma.sql`"createdAt" >= ${fromDate}`)
     if (toDate) conditions.push(Prisma.sql`"createdAt" <= ${toDate}`)
     const whereSql = Prisma.join(conditions, ' AND ')
+    const latestForStaleness = await prisma.smartMeterData.findFirst({
+      where: { deviceId, ...(meterValue ? { meter: meterValue } : {}) },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true }
+    })
+    if (isSmartMeterDataStale(latestForStaleness?.createdAt)) {
+      return res.json({
+        deviceId,
+        meter: meterValue || null,
+        bucket,
+        range: {
+          from: fromDate ? fromDate.toISOString() : null,
+          to: toDate ? toDate.toISOString() : null
+        },
+        staleAfterSeconds: SMART_METER_STALE_SECONDS,
+        dataStale: true,
+        lastSavedAt: latestForStaleness?.createdAt?.toISOString() || null,
+        series: null
+      })
+    }
 
     const rows = await prisma.$queryRaw<{
       bucket: Date
@@ -455,6 +631,9 @@ router.get('/:deviceId/analytics/series', async (req, res) => {
         from: fromDate ? fromDate.toISOString() : null,
         to: toDate ? toDate.toISOString() : null
       },
+      staleAfterSeconds: SMART_METER_STALE_SECONDS,
+      dataStale: false,
+      lastSavedAt: latestForStaleness?.createdAt?.toISOString() || null,
       series
     })
   } catch (error) {
@@ -490,12 +669,15 @@ router.get('/:deviceId/analytics/live', async (req, res) => {
     })
     const snapshot = await getSmartMeterLiveSnapshotStored(deviceId)
 
-    if (!latest) {
+    if (!latest || isSmartMeterDataStale(latest.createdAt)) {
       return res.json({
         deviceId,
         meter: meterValue || null,
         parameterPrefix,
-        prefixedParameters: null
+        staleAfterSeconds: SMART_METER_STALE_SECONDS,
+        dataStale: true,
+        lastSavedAt: latest?.createdAt?.toISOString() || null,
+        prefixedParameters: buildNullPrefixedParameters(parameterPrefix)
       })
     }
 
@@ -577,7 +759,7 @@ router.get('/:deviceId/analytics/live', async (req, res) => {
 
     const live = {
       timestamp: latest.createdAt,
-      status: latest.status,
+      status: connectivityStatusFromFreshness(latest.createdAt),
       machine: latest.machine,
       fault: latest.fault,
       temperatureC: latest.temperatureC,
@@ -661,6 +843,9 @@ router.get('/:deviceId/analytics/live', async (req, res) => {
       deviceId,
       meter: latest.meter || snapshot?.meter || meterValue || null,
       parameterPrefix,
+      staleAfterSeconds: SMART_METER_STALE_SECONDS,
+      dataStale: false,
+      lastSavedAt: latest.createdAt.toISOString(),
       prefixedParameters
     })
   } catch (error) {
@@ -703,6 +888,27 @@ router.get('/:deviceId/analytics/trend', async (req, res) => {
     ]
     if (meterValue) conditions.push(Prisma.sql`"meter" = ${meterValue}`)
     const whereSql = Prisma.join(conditions, ' AND ')
+    const latestForStaleness = await prisma.smartMeterData.findFirst({
+      where: { deviceId, ...(meterValue ? { meter: meterValue } : {}) },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true }
+    })
+    if (isSmartMeterDataStale(latestForStaleness?.createdAt)) {
+      return res.json({
+        deviceId,
+        meter: meterValue || null,
+        bucket,
+        minutes,
+        range: {
+          from: fromDate.toISOString(),
+          to: now.toISOString()
+        },
+        staleAfterSeconds: SMART_METER_STALE_SECONDS,
+        dataStale: true,
+        lastSavedAt: latestForStaleness?.createdAt?.toISOString() || null,
+        series: null
+      })
+    }
 
     const rows = await prisma.$queryRaw<{
       bucket: Date
@@ -754,6 +960,9 @@ router.get('/:deviceId/analytics/trend', async (req, res) => {
         from: fromDate.toISOString(),
         to: now.toISOString()
       },
+      staleAfterSeconds: SMART_METER_STALE_SECONDS,
+      dataStale: false,
+      lastSavedAt: latestForStaleness?.createdAt?.toISOString() || null,
       series
     })
   } catch (error) {
@@ -777,14 +986,37 @@ router.get('/:deviceId/data', async (req, res) => {
 
     if (!device) return res.status(404).json({ error: 'Device not found' })
     if (device.deviceType !== 'SMART_METER') return res.status(400).json({ error: 'Not a smart meter device' })
+    const latestForStaleness = await prisma.smartMeterData.findFirst({
+      where: { deviceId },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true }
+    })
+    if (isSmartMeterDataStale(latestForStaleness?.createdAt)) {
+      return res.json({
+        deviceId: device.deviceId,
+        staleAfterSeconds: SMART_METER_STALE_SECONDS,
+        dataStale: true,
+        lastSavedAt: latestForStaleness?.createdAt?.toISOString() || null,
+        data: [buildNullSmartMeterData()]
+      })
+    }
 
     const data = await prisma.smartMeterData.findMany({
       where: { deviceId },
       orderBy: { createdAt: 'desc' },
       take: parseInt(limit as string)
     })
-
-    res.json({ deviceId: device.deviceId, data })
+    const dataWithConnectivityStatus = data.map((row) => ({
+      ...row,
+      status: connectivityStatusFromFreshness(row.createdAt)
+    }))
+    res.json({
+      deviceId: device.deviceId,
+      staleAfterSeconds: SMART_METER_STALE_SECONDS,
+      dataStale: false,
+      lastSavedAt: latestForStaleness?.createdAt?.toISOString() || null,
+      data: dataWithConnectivityStatus
+    })
   } catch (error) {
     console.error('❌ Error fetching smart meter data:', error)
     res.status(500).json({ error: 'Failed to fetch data' })
@@ -841,6 +1073,14 @@ router.get('/:deviceId/latest', async (req, res) => {
       where: { deviceId },
       orderBy: { createdAt: 'desc' }
     })
+    const dataStale = isSmartMeterDataStale(latestData?.createdAt)
+    const latestDataResponse =
+      latestData && !dataStale
+        ? {
+            ...latestData,
+            status: connectivityStatusFromFreshness(latestData.createdAt)
+          }
+        : buildNullSmartMeterData()
 
     const settings = await prisma.smartMeterSettings.findUnique({
       where: { deviceId }
@@ -853,7 +1093,10 @@ router.get('/:deviceId/latest', async (req, res) => {
         ipAddress: device.ipAddress,
         firmwareVersion: device.firmwareVersion
       },
-      latestData: latestData || null,
+      staleAfterSeconds: SMART_METER_STALE_SECONDS,
+      dataStale,
+      lastSavedAt: latestData?.createdAt?.toISOString() || null,
+      latestData: latestDataResponse,
       settings: settings || null
     })
   } catch (error) {

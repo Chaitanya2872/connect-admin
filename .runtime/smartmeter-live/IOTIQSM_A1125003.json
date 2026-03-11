@@ -1,0 +1,1 @@
+{"deviceId":"IOTIQSM_A1125003","meter":null,"updatedAt":"2026-03-11T07:29:32.833Z","status":"off","temperature":27,"fault":null,"frequency":50,"machine":false,"voltagePhases":[231.14,235.71,236.43,231.14,400.33],"currentPhases":[1.6,0.96,0.78,3.34],"powerPhases":[-32.41,0.06,0.04,-130.75],"powerFactorPhases":[-1,0.34,0.17,-1]}

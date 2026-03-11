@@ -1123,8 +1123,7 @@ router.get('/:deviceId/latest', function (req, res) { return __awaiter(void 0, v
                 latestData = _b.sent();
                 dataStale = isSmartMeterDataStale(latestData === null || latestData === void 0 ? void 0 : latestData.createdAt);
                 latestDataResponse = latestData && !dataStale
-                    ? __assign(__assign({}, latestData), { status: connectivityStatusFromFreshness(latestData.createdAt) })
-                    : buildNullSmartMeterData();
+                    ? __assign(__assign({}, latestData), { status: connectivityStatusFromFreshness(latestData.createdAt) }) : buildNullSmartMeterData();
                 return [4 /*yield*/, prisma_1.prisma.smartMeterSettings.findUnique({
                         where: { deviceId: deviceId }
                     })];

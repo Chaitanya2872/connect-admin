@@ -1,5 +1,5 @@
 import * as express from 'express'
-import * as cors from 'cors'
+import cors = require('cors')
 import analyticsRoutes from './routes/analytics.routes'
 import reportRoutes from './routes/report.routes'
 import deviceRoutes from './routes/device.routes'

@@ -810,7 +810,7 @@ router.get('/:deviceId/analytics/live', async (req, res) => {
 
     const prefixedParameters: Record<string, unknown> = {
       [`${parameterPrefix}_timestamp`]:             live.timestamp,
-      [`${parameterPrefix}_status`]:                live.status,
+      [`${parameterPrefix}_stat`]:                live.status,
       [`${parameterPrefix}_machine`]:               live.machine,
       [`${parameterPrefix}_fault`]:                 live.fault,
       [`${parameterPrefix}_temperatureC`]:          live.temperatureC,
